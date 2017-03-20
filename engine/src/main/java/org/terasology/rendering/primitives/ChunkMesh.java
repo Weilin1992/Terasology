@@ -20,6 +20,7 @@ import gnu.trove.list.TFloatList;
 import gnu.trove.list.TIntList;
 import gnu.trove.list.array.TFloatArrayList;
 import gnu.trove.list.array.TIntArrayList;
+import org.lwjgl.opengl.ARBOcclusionQuery;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
 import org.lwjgl.opengl.GL15;
@@ -30,52 +31,56 @@ import java.nio.IntBuffer;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
-import static org.lwjgl.opengl.GL11.GL_COLOR_ARRAY;
-import static org.lwjgl.opengl.GL11.GL_CULL_FACE;
-import static org.lwjgl.opengl.GL11.GL_NORMAL_ARRAY;
-import static org.lwjgl.opengl.GL11.GL_TEXTURE_COORD_ARRAY;
-import static org.lwjgl.opengl.GL11.GL_VERTEX_ARRAY;
-import static org.lwjgl.opengl.GL11.glColorPointer;
-import static org.lwjgl.opengl.GL11.glDisable;
-import static org.lwjgl.opengl.GL11.glDisableClientState;
-import static org.lwjgl.opengl.GL11.glEnable;
-import static org.lwjgl.opengl.GL11.glEnableClientState;
-import static org.lwjgl.opengl.GL11.glNormalPointer;
-import static org.lwjgl.opengl.GL11.glTexCoordPointer;
-import static org.lwjgl.opengl.GL11.glVertexPointer;
 
-/**
- * Chunk meshes are used to store the vertex data of tessellated chunks.
- */
-@SuppressWarnings("PointlessArithmeticExpression")
-public class ChunkMesh {
+
+
+import static org.lwjgl.opengl.GL11.*;
+
 
     /**
-     * Possible rendering types.
+     * Chunk meshes are used to store the vertex data of tessellated chunks.
      */
-    public enum RenderType {
-        OPAQUE(0),
-        TRANSLUCENT(1),
-        BILLBOARD(2),
-        WATER_AND_ICE(3);
+    @SuppressWarnings("PointlessArithmeticExpression")
+    public class ChunkMesh {
 
-        private int meshIndex;
+        /**
+         * Possible rendering types.
+         */
+        public enum RenderType {
+            OPAQUE(0),
+            TRANSLUCENT(1),
+            BILLBOARD(2),
+            WATER_AND_ICE(3);
 
-        private RenderType(int index) {
-            meshIndex = index;
+            private int meshIndex;
+
+            private RenderType(int index) {
+                meshIndex = index;
+            }
+
+            public int getIndex() {
+                return meshIndex;
+            }
         }
 
-        public int getIndex() {
-            return meshIndex;
+        public enum RenderPhase {
+            OPAQUE,
+            ALPHA_REJECT,
+            REFRACTIVE,
+            Z_PRE_PASS
         }
-    }
 
-    public enum RenderPhase {
-        OPAQUE,
-        ALPHA_REJECT,
-        REFRACTIVE,
-        Z_PRE_PASS
-    }
+        public  enum OcclusionState{
+            Waiting,
+            Hidden,
+            Visible
+        }
+
+
+
+
+
+
 
     /* CONST */
     public static final int SIZE_VERTEX = 3;
@@ -98,6 +103,11 @@ public class ChunkMesh {
 
     /* STATS */
     private int triangleCount = -1;
+
+    /* Occlusion Query */
+    public int queryid = -1;
+    public boolean occluded = false;
+    public OcclusionState occlusionState = OcclusionState.Hidden;
 
     /* TEMPORARY DATA */
     private Map<RenderType, VertexElements> vertexElements = Maps.newEnumMap(RenderType.class);
@@ -131,7 +141,7 @@ public class ChunkMesh {
     /**
      * Generates the VBOs from the pre calculated arrays.
      *
-     * @return True if something was generated
+             * @return True if something was generated
      */
     public boolean generateVBOs() {
         if (lock.tryLock()) {
@@ -149,6 +159,10 @@ public class ChunkMesh {
                 vertexElements = null;
                 // Calculate the final amount of triangles
                 triangleCount = (vertexCount[0] + vertexCount[1] + vertexCount[2] + vertexCount[3]) / 3;
+
+                if(vertexCount[0]/3 > 0)
+                    queryid = ARBOcclusionQuery.glGenQueriesARB();
+
             } finally {
                 lock.unlock();
             }
@@ -169,6 +183,7 @@ public class ChunkMesh {
 
             VertexBufferObjectUtil.bufferVboElementData(idxBuffers[id], elements.finalIndices, GL15.GL_STATIC_DRAW);
             VertexBufferObjectUtil.bufferVboData(vertexBuffers[id], elements.finalVertices, GL15.GL_STATIC_DRAW);
+
         } else {
             vertexBuffers[id] = 0;
             idxBuffers[id] = 0;
@@ -176,6 +191,53 @@ public class ChunkMesh {
         }
 
     }
+    public void renderOcclusionQueries(){
+        if (lock.tryLock()) {
+            try {
+                if (vertexBuffers[0] <= 0 || disposed || occlusionState != OcclusionState.Waiting) {
+                    return;
+                }
+                occlusionState = OcclusionState.Waiting;
+                ARBOcclusionQuery.glBeginQueryARB(ARBOcclusionQuery.GL_SAMPLES_PASSED_ARB,queryid);
+                glEnableClientState(GL_VERTEX_ARRAY);
+
+                GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, idxBuffers[0]);
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vertexBuffers[0]);
+
+                glVertexPointer(SIZE_VERTEX, GL11.GL_FLOAT, STRIDE, OFFSET_VERTEX);
+                GL11.glDrawElements(GL11.GL_TRIANGLES, vertexCount[0], GL11.GL_UNSIGNED_INT, 0);
+
+                GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
+                GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, 0);
+
+                glDisableClientState(GL_VERTEX_ARRAY);
+                ARBOcclusionQuery.glEndQueryARB(ARBOcclusionQuery.GL_SAMPLES_PASSED_ARB);
+
+            } finally {
+                lock.unlock();
+            }
+        }
+
+    }
+
+    public boolean isOccluded(){
+        int passed = Integer.MAX_VALUE;
+        int availble = 0;
+        availble = ARBOcclusionQuery.glGetQueryObjectuiARB(queryid,ARBOcclusionQuery.GL_QUERY_RESULT_AVAILABLE_ARB);
+        if(availble != 0) {
+            passed = 0;
+            passed = ARBOcclusionQuery.glGetQueryObjectuiARB(queryid, ARBOcclusionQuery.GL_QUERY_RESULT_ARB);
+            occlusionState = passed != 0 ? OcclusionState.Visible:OcclusionState.Hidden;
+            occluded = passed < 4;
+        }
+        else {
+            occlusionState = OcclusionState.Waiting;
+        }
+        return occluded;
+    }
+
+
+
 
     private void renderVbo(int id) {
         if (lock.tryLock()) {
@@ -258,6 +320,13 @@ public class ChunkMesh {
                     }
                 }
 
+                if(queryid != -1){
+                    ARBOcclusionQuery.glDeleteQueriesARB(queryid);
+                }
+
+                queryid = -1;
+                occluded = false;
+                occlusionState = OcclusionState.Hidden;
                 disposed = true;
                 vertexElements = null;
             }

@@ -38,7 +38,7 @@ public final class HealthComponent implements Component {
     @Replicate
     public float excessSpeedDamageMultiplier = 10f;
 
-    @Replicate
+
     @TextField
     public int currentHealth = 20;
 
@@ -56,4 +56,5 @@ public final class HealthComponent implements Component {
         this.regenRate = regenRate;
         this.waitBeforeRegen = waitBeforeRegen;
     }
+
 }

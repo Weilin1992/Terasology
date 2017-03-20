@@ -48,4 +48,6 @@ public interface RenderableWorld {
     String getMetrics();
 
     ChunkProvider getChunkProvider();
+
+    void updateOcclusion();
 }

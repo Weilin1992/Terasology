@@ -59,7 +59,11 @@ import org.terasology.world.chunks.ChunkProvider;
 import org.terasology.world.chunks.RenderableChunk;
 
 /**
+ * Start Coding On Occlusion Culling
  */
+
+
+
 public final class WorldRendererImpl implements WorldRenderer {
 
     private static final int SHADOW_FRUSTUM_BOUNDS = 500;
@@ -274,6 +278,8 @@ public final class WorldRendererImpl implements WorldRenderer {
         if (currentRenderingStage != WorldRenderingStage.MONO) {
             playerCamera.updateFrustum();
         }
+
+        renderableWorld.updateOcclusion();
 
         // this line needs to be here as deep down it relies on the camera's frustrum, updated just above.
         renderableWorld.queueVisibleChunks(isFirstRenderingStageForCurrentFrame);

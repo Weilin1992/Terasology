@@ -44,6 +44,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 
+import static org.lwjgl.opengl.GL11.glColorMask;
+import static org.lwjgl.opengl.GL11.glDepthMask;
+
 /**
  * Created by manu on 24.12.2014.
  */
@@ -77,6 +80,7 @@ public class RenderableWorldImpl implements RenderableWorld {
     private int statDirtyChunks;
     private int statVisibleChunks;
     private int statIgnoredPhases;
+    private int statOccludedChunks;
 
     public RenderableWorldImpl(WorldProvider worldProvider, ChunkProvider chunkProvider, GLBufferPool bufferPool, Camera playerCamera, Camera shadowMapCamera) {
         this.worldProvider = worldProvider;
@@ -177,6 +181,32 @@ public class RenderableWorldImpl implements RenderableWorld {
         PerformanceMonitor.endActivity();
 
     }
+
+    @Override
+    public void updateOcclusion(){
+        Iterator<RenderableChunk> nearbyChunks = chunksInProximityOfCamera.iterator();
+        RenderableChunk chunk;
+        ChunkMesh mesh;
+        glColorMask(false,false,false,false);
+        glDepthMask(false);
+        while (nearbyChunks.hasNext()){
+            chunk = nearbyChunks.next();
+            if(isChunkValidForRender(chunk)) {
+                mesh = chunk.getMesh();
+                if (isChunkVisible(chunk)) {
+                    if (triangleCount(mesh, ChunkMesh.RenderPhase.OPAQUE) > 0) {
+                        mesh.renderOcclusionQueries();
+                    }
+                }
+            }
+        }
+        glColorMask(true,true,true,true);
+        glDepthMask(true);
+
+    }
+
+
+
 
     /**
      * Updates the list of chunks around the player.
@@ -283,6 +313,7 @@ public class RenderableWorldImpl implements RenderableWorld {
         statDirtyChunks = 0;
         statVisibleChunks = 0;
         statIgnoredPhases = 0;
+        statOccludedChunks = 0;
 
         int processedChunks = 0;
         int chunkCounter = 0;
@@ -290,6 +321,7 @@ public class RenderableWorldImpl implements RenderableWorld {
         RenderableChunk chunk;
         boolean isDynamicShadows = renderingConfig.isDynamicShadows();
         Iterator<RenderableChunk> nearbyChunks = chunksInProximityOfCamera.iterator();
+        int size = chunksInProximityOfCamera.size();
         while (nearbyChunks.hasNext()) {
             chunk = nearbyChunks.next();
 
@@ -306,7 +338,11 @@ public class RenderableWorldImpl implements RenderableWorld {
 
                 if (isChunkVisible(chunk)) {
                     if (triangleCount(mesh, ChunkMesh.RenderPhase.OPAQUE) > 0) {
-                        renderQueues.chunksOpaque.add(chunk);
+                        if (!mesh.isOccluded()) {
+                            renderQueues.chunksOpaque.add(chunk);
+                        }else {
+                            statOccludedChunks++;
+                        }
                     } else {
                         statIgnoredPhases++;
                     }

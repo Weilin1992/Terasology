@@ -272,6 +272,7 @@ public class HealthAuthoritySystem extends BaseComponentSystem implements Update
         return "Inflicted damage of " + amount;
     }
 
+
     @Command(shortDescription = "Restores your health to max", runOnServer = true,
             requiredPermission = PermissionManager.CHEAT_PERMISSION)
     public String healthMax(@Sender EntityRef clientEntity) {
